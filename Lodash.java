@@ -20,14 +20,11 @@ public class Lodash {
   private static final String METHOD_ARGUMENT_REGEX = "\\{[0-9]+\\}";
   private static final String METHOD_ITERABLE_INDEX = "^\\[{1}-{0,1}[0-9]*\\]{1}$";
 
-
   public static Object get(Object object, List<String> path, Object... args) {
     if (path == null || path.isEmpty()) {
       return object;
     }
-    if (args == null)
-      args = new Object[0];
-
+    
     return get(object, path.toArray(new String[path.size()]), args);
   }
 
