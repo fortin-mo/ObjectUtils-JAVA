@@ -10,21 +10,31 @@ import java.io.InvalidClassException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.el.MethodNotFoundException;
 
+import com.sun.javaws.exceptions.InvalidArgumentException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 
-public class Lodash {
+public class ObjectUtils {
+
+  private static final String BRACKET_START = "[";
+  private static final String BRACKET_END = "]";
 
   private static final String METHOD_REGEX = "^[a-zA-Z_]{1}[a-zA-Z_0-9]*\\({1}(\\{[0-9]+\\},{0,1})*\\){1}$";
   private static final String METHOD_ARGUMENT_REGEX = "\\{[0-9]+\\}";
   private static final String METHOD_ITERABLE_INDEX = "^\\[{1}-{0,1}[0-9]*\\]{1}$";
+  private static final String WITH_ITERABLE = "\\[{1}-{0,1}[0-9]*\\]{1}";
+
+  private static final String FULL_STRING_REGEX = "(\\.([a-zA-Z_]{1}[a-zA-Z_0-9]*((\\({1}(\\{[0-9]+\\}{0,1})*\\){1})|(\\[{1}-{0,1}[0-9]*\\]{1})){0,1}))+$";
 
   /*
    *
@@ -46,8 +56,6 @@ public class Lodash {
    * @return object returned from path of type T, or null
    */
   public static <T> T getOrDefault(Object object, T def, List<String> path, Object... args) {
-    // Assert.notNull(def, "def Arguement cannot be null");
-
     Object value = get(object, path, args);
 
     if (Objects.isNull(value)) {
@@ -81,20 +89,22 @@ public class Lodash {
   }
 
   /**
-   * Generic implement of Lodash get.
-   * Returns null if not found.
-   *
+   * Lodash equivalent of get.
+   * returns null if path not found.
+   * 
    * @param object object to get from
-   * @param path array of path (methods, field) -- e.g "get({0})", "name", "removeFrom({1},{2})"
+   * @param path path as string
    * @param args arguments to invoke methods with
    * @return object returned from path, or null
    */
-  public static Object get(Object object, List<String> path, Object... args) {
-    if (CollectionUtils.isEmpty(path)) {
+  public static Object get(Object object, String path, Object... args) {
+
+    if (StringUtils.isBlank(path) || object == null) {
       return object;
     }
-
-    return get(object, path.toArray(new String[path.size()]), args);
+    
+    PathBuilder builder = new PathBuilder(path);
+    return get(object, builder, args);
   }
 
   /**
@@ -102,11 +112,37 @@ public class Lodash {
    * returns null if path not found.
    *
    * @param object object to get from
-   * @param path array of path (methods, field) -- e.g "get({0})", "name", "removeFrom({1},{2})"
+   * @param paths array of path (methods, field) -- e.g "get({0})", "name", "removeFrom({1},{2})"
    * @param args arguments to invoke methods with
    * @return object returned from path, or null
    */
-  public static Object get(Object object, String[] path, Object... args) {
+  public static Object get(Object object, String[] paths, Object... args) {
+    if (object == null || paths == null) {
+      return object;
+    }
+
+    return get(object, Arrays.asList(paths), args);
+  }
+
+  /**
+   * Generic implement of Lodash get.
+   * Returns null if not found.
+   *
+   * @param object object to get from
+   * @param paths array of path (methods, field) -- e.g "get({0})", "name", "removeFrom({1},{2})"
+   * @param args arguments to invoke methods with
+   * @return object returned from path, or null
+   */
+  public static Object get(Object object, Collection<String> paths, Object... args) {
+    if (CollectionUtils.isEmpty(paths) || object == null) {
+      return object;
+    }
+
+    PathBuilder pathBuilder = new PathBuilder(paths);
+    return get(object, pathBuilder, args);
+  }
+  
+  private static Object get(Object object, PathBuilder builder, Object... args) {
     if (args == null) {
       args = new Object[0];
     }
@@ -114,48 +150,42 @@ public class Lodash {
     Object returned = object;
 
     try {
-      for (String property : path) {
+      for (Path path : builder.get()) {
 
-        if (property.matches(METHOD_REGEX)) {
-          // method call
-          String unparsedArguments = property.substring(property.indexOf("(") + 1, property.length() - 1);
-          String methodName = property.substring(0, property.indexOf("("));
-          String[] parsedArguments = parseStringArguments(unparsedArguments);
+        if(path.isMethod) {
 
-          Object[] invokeWith = new Object[parsedArguments.length];
-          Class[] parameterTypes = new Class[parsedArguments.length];
-          Object[] parameterValues = new Object[parsedArguments.length];
+          Class[] parameterTypes = new Class[path.argsIndexes.length];
+          Object[] parameterValues = new Object[path.argsIndexes.length];
 
           int paramIndex = 0;
-          for (String param : parsedArguments) {
-            int ind = Integer.parseInt(param.substring(1, param.length() - 1));
-            parameterTypes[paramIndex] = args[ind].getClass();
+          for (int ind : path.argsIndexes) {
+            Object arg = args[ind];
+
+            parameterTypes[paramIndex] = arg != null ? arg.getClass() : null;
             parameterValues[paramIndex] = args[ind];
-            invokeWith[paramIndex] = args[ind];
+
             paramIndex++;
           }
 
-          Method method = findMethod(returned, methodName, parameterTypes, parameterValues);
-          returned = method.invoke(returned, invokeWith);
+          Method method = findMethod(returned, path.name, parameterTypes, parameterValues);
+          returned = method.invoke(returned, parameterValues);
 
-        } else if (property.matches(METHOD_ITERABLE_INDEX)) {
-          int index = Integer.parseInt(property.substring(1, property.length() - 1));
-
-          if (index < 0) {
+        } else if (path.isIterable) {
+          if (path.index < 0) {
             throw new IndexOutOfBoundsException();
           }
 
           if (object.getClass().isArray()) {
-            returned = Array.get(returned, index);
+            returned = Array.get(returned, path.index);
           } else if (returned instanceof Iterable) {
             Iterable it = ((Iterable<Object>)returned);
-            returned = Iterables.get(it, index);
+            returned = Iterables.get(it, path.index);
           } else {
             throw new InvalidClassException("Expected Iterable");
           }
         } else {
-          // field
-          returned = returned.getClass().getField(property).get(returned);
+          // isField
+          returned = returned.getClass().getField(path.name).get(returned);
         }
       }
     } catch (Exception ex) {
@@ -166,37 +196,17 @@ public class Lodash {
     return returned;
   }
 
-  private static String[] parseStringArguments(String unparsedArguments) {
-    String[] parsedArguments;
-
-    if (StringUtils.isBlank(unparsedArguments)) {
-      parsedArguments = new String[0];
-    } else {
-      Pattern pattern = Pattern.compile(METHOD_ARGUMENT_REGEX);
-      Matcher matcher = pattern.matcher(unparsedArguments.replaceAll(",", StringUtils.EMPTY));
-
-      List<String> groups = new ArrayList<>();
-      while (matcher.find()) {
-        groups.add(matcher.group(0));
-      }
-
-      parsedArguments = groups.toArray(new String[groups.size()]);
-    }
-
-    return parsedArguments;
-  }
-
   private static Method findMethod(Object obj, String name, Class[] parameterTypes, Object[] parameterValues)
       throws NoSuchMethodException, MethodNotFoundException {
-
-    Method[] methods = obj.getClass().getDeclaredMethods();
 
     Method method = null;
 
     if (parameterTypes.length <= 0) {
       method = obj.getClass().getDeclaredMethod(name, null);
     } else {
-      for (Method m : methods) {
+      Method[] methods = obj.getClass().getDeclaredMethods();
+
+      List<Method> matches = Arrays.asList(methods).stream().filter(m -> {
         if (m.getName().equals(name) && m.getParameterCount() == parameterValues.length) {
 
           Boolean same = true;
@@ -206,10 +216,17 @@ public class Lodash {
             same = compareTypes(params[index], parameterTypes[index], parameterValues[index]);
           }
 
-          if (same) {
-            method = m;
-            break;
-          }
+          return same;
+        }
+
+        return false;
+      }).collect(Collectors.toList());
+
+      if (!matches.isEmpty()) {
+        method = matches.get(0);
+
+        if (matches.size() > 2) {
+          System.out.println("Found two or more matching methods with required arguments !");
         }
       }
     }
@@ -222,15 +239,21 @@ public class Lodash {
   }
 
   /**
-   * compare to classes.. usefull for comparing primitive types.
+   * compare two classes.
    *
-   * @param wanted first
-   * @param actual second
+   * @param wanted wanted class
+   * @param actual provided class
+   * @param actualObject actual object
    * @return boolean
    */
   private static boolean compareTypes(Class wanted, Class actual, Object actualObject) {
-    if (wanted == null || actual == null || actualObject == null) {
+    if (wanted == null) {
       return false;
+    }
+
+    if (!wanted.isPrimitive() && (actual == null || actualObject == null)) {
+      // primitive classes cannot be instantiate with NULL
+      return true;
     }
 
     if (Object.class.equals(actual)) {
@@ -242,8 +265,9 @@ public class Lodash {
       return true;
     }
 
-    boolean matching = false;
+    boolean matching;
 
+    // handles primitive types
     switch (wanted.getName()) {
       case "java.lang.Boolean":
       case "boolean":
@@ -291,5 +315,155 @@ public class Lodash {
     }
 
     return matching;
+  }
+
+  public static class PathBuilder {
+    List<Path> paths;
+
+    public PathBuilder(String path) {
+      this.paths = new ArrayList<>();
+
+      if (StringUtils.isBlank(path)) {
+        return;
+      }
+
+      if (!path.contains(".")) {
+        paths.add(new Path(path));
+      } else {
+        buildPaths(Arrays.asList(path.split("\\.")));
+      }
+    }
+
+    public PathBuilder(Collection<String> properties) {
+      buildPaths(properties);
+    }
+
+    public List<Path> get() {
+      return this.paths;
+    }
+
+    private void buildPaths(Collection<String> properties) {
+      if (CollectionUtils.isEmpty(properties)) {
+        this.paths = new ArrayList<>();
+        return;
+      }
+
+      for(String p : properties) {
+        if (StringUtils.isBlank(p)) {
+          // skip empty
+          continue;
+        }
+
+        Pattern pattern = Pattern.compile(WITH_ITERABLE);
+        if (!p.matches(METHOD_ITERABLE_INDEX) && pattern.matcher(p).find(1)) {
+          // ex: .split({0})[1] --> .split({0}) and [1] separately
+
+          Matcher matcher = pattern.matcher(p);
+
+          int lastKnownStartBracket = p.indexOf(BRACKET_START);
+
+          String tempPath = p.substring(0, lastKnownStartBracket);
+          paths.add(new Path(tempPath));
+
+          boolean skippedFirstGroup = false;
+          while (matcher.find()) {
+
+            if (skippedFirstGroup) {
+              int endBracketIndex = p.indexOf(BRACKET_END, lastKnownStartBracket);
+              int nextStartBracketIndex = p.indexOf(BRACKET_START, endBracketIndex);
+
+              lastKnownStartBracket = nextStartBracketIndex;
+
+              if (endBracketIndex >= 0 && nextStartBracketIndex > endBracketIndex) {
+                tempPath = p.substring(endBracketIndex + 1, nextStartBracketIndex);
+
+                if (tempPath.length() > 0) {
+                  paths.add(new Path(tempPath));
+                }
+              }
+            }
+
+            skippedFirstGroup = true;
+
+            paths.add(new Path(matcher.group(0)));
+          }
+
+        } else {
+          paths.add(new Path(p));
+        }
+      }
+    }
+  }
+
+  public static class Path {
+    boolean isIterable = false;
+    boolean isField = false;
+    boolean isMethod = false;
+
+    String path;
+    String name;
+
+    String[] args;
+    int[] argsIndexes;
+    int index;
+
+    public Path(String path) {
+      this.path = path;
+
+      if (path.matches(METHOD_ITERABLE_INDEX)) {
+        buildIterable();
+      } else if (path.matches(METHOD_REGEX)) {
+        buildMethod();
+      } else { // is field
+        buildField();
+      }
+    }
+
+    private void buildField() {
+      isField = true;
+      name = path;
+    }
+
+    private void buildMethod() {
+      isMethod = true;
+
+      String unparsedArguments = path.substring(path.indexOf("(") + 1, path.length() - 1);
+      args = parseStringArguments(unparsedArguments);
+
+      argsIndexes = new int[args.length];
+
+      for (int index = 0; index < args.length; index++) {
+        String arg = args[index];
+        int ind = Integer.parseInt(arg.substring(1, arg.length() - 1));
+        argsIndexes[index] = ind;
+      }
+
+      name = path.substring(0, path.indexOf("("));
+    }
+
+    private void buildIterable() {
+      isIterable = true;
+      index = Integer.parseInt(path.substring(1, path.length() - 1));
+    }
+
+    private String[] parseStringArguments(String unparsedArguments) {
+      String[] parsedArguments;
+
+      if (StringUtils.isBlank(unparsedArguments)) {
+        parsedArguments = new String[0];
+      } else {
+        Pattern pattern = Pattern.compile(METHOD_ARGUMENT_REGEX);
+        Matcher matcher = pattern.matcher(unparsedArguments.replaceAll(",", StringUtils.EMPTY));
+
+        List<String> groups = new ArrayList<>();
+        while (matcher.find()) {
+          groups.add(matcher.group(0));
+        }
+
+        parsedArguments = groups.toArray(new String[groups.size()]);
+      }
+
+      return parsedArguments;
+    }
   }
 }
