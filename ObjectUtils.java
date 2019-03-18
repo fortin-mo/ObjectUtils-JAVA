@@ -5,6 +5,7 @@
 // package;
 
 import com.google.common.collect.Iterables;
+import com.sun.javaws.exceptions.InvalidArgumentException;
 
 import java.io.InvalidClassException;
 import java.lang.reflect.Array;
@@ -19,7 +20,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.el.MethodNotFoundException;
 
-import com.sun.javaws.exceptions.InvalidArgumentException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
@@ -91,7 +91,7 @@ public class ObjectUtils {
   /**
    * Lodash equivalent of get.
    * returns null if path not found.
-   * 
+   *
    * @param object object to get from
    * @param path path as string
    * @param args arguments to invoke methods with
@@ -102,7 +102,7 @@ public class ObjectUtils {
     if (StringUtils.isBlank(path) || object == null) {
       return object;
     }
-    
+
     PathBuilder builder = new PathBuilder(path);
     return get(object, builder, args);
   }
@@ -141,7 +141,7 @@ public class ObjectUtils {
     PathBuilder pathBuilder = new PathBuilder(paths);
     return get(object, pathBuilder, args);
   }
-  
+
   private static Object get(Object object, PathBuilder builder, Object... args) {
     if (args == null) {
       args = new Object[0];
@@ -343,8 +343,9 @@ public class ObjectUtils {
     }
 
     private void buildPaths(Collection<String> properties) {
+      this.paths = new ArrayList<>();
+
       if (CollectionUtils.isEmpty(properties)) {
-        this.paths = new ArrayList<>();
         return;
       }
 
