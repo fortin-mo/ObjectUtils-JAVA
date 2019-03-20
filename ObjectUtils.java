@@ -2,10 +2,9 @@
  * @Author mooffy
  */
 
-// package;
+// package
 
 import com.google.common.collect.Iterables;
-import com.sun.javaws.exceptions.InvalidArgumentException;
 
 import java.io.InvalidClassException;
 import java.lang.reflect.Array;
@@ -13,13 +12,17 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Observable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.el.MethodNotFoundException;
 
+import com.sun.javaws.exceptions.InvalidArgumentException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
@@ -238,6 +241,17 @@ public class ObjectUtils {
     return method;
   }
 
+  private static final Map<Class, Class> PRIMITIVE_TO_NON_PRIMITIVE = new HashMap<Class, Class>() {{
+    put(boolean.class, Boolean.class);
+    put(byte.class, Byte.class);
+    put(char.class, Character.class);
+    put(short.class, Short.class);
+    put(int.class, Integer.class);
+    put(long.class, Long.class);
+    put(float.class, Float.class);
+    put(double.class, Double.class);
+  }};
+
   /**
    * compare two classes.
    *
@@ -265,56 +279,14 @@ public class ObjectUtils {
       return true;
     }
 
-    boolean matching;
+    if (wanted.isPrimitive() || actual.isPrimitive()) {
+      Class nonPrimitiveWanted = PRIMITIVE_TO_NON_PRIMITIVE.getOrDefault(wanted, wanted);
+      Class nonPrimitiveActual = PRIMITIVE_TO_NON_PRIMITIVE.getOrDefault(actual, actual);
 
-    // handles primitive types
-    switch (wanted.getName()) {
-      case "java.lang.Boolean":
-      case "boolean":
-        matching =  actual.getName().equals("java.lang.Boolean") || actual.getName().equals("boolean");
-        break;
-
-      case "java.lang.Byte":
-      case "byte":
-        matching =  actual.getName().equals("java.lang.Byte") || actual.getName().equals("byte");
-        break;
-
-      case "java.lang.Character":
-      case "char":
-        matching =  actual.getName().equals("java.lang.Character") || actual.getName().equals("char");
-        break;
-
-      case "java.lang.Short":
-      case "short":
-        matching =  actual.getName().equals("java.lang.Short") || actual.getName().equals("short");
-        break;
-
-      case "java.lang.Integer":
-      case "int":
-        matching =  actual.getName().equals("java.lang.Integer") || actual.getName().equals("int");
-        break;
-
-      case "java.lang.Long":
-      case "long":
-        matching =  actual.getName().equals("java.lang.Long") || actual.getName().equals("long");
-        break;
-
-      case "java.lang.Float":
-      case "float":
-        matching =  actual.getName().equals("java.lang.Float") || actual.getName().equals("float");
-        break;
-
-      case "java.lang.Double":
-      case "double":
-        matching =  actual.getName().equals("java.lang.Double") || actual.getName().equals("double");
-        break;
-
-      default:
-        matching = wanted.equals(actual);
-        break;
+      return Objects.equals(nonPrimitiveActual, nonPrimitiveWanted);
     }
 
-    return matching;
+    return wanted.equals(actual);
   }
 
   public static class PathBuilder {
