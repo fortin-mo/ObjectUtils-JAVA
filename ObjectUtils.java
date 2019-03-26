@@ -39,6 +39,21 @@ public class ObjectUtils {
 
   private static final String FULL_STRING_REGEX = "(\\.([a-zA-Z_]{1}[a-zA-Z_0-9]*((\\({1}(\\{[0-9]+\\}{0,1})*\\){1})|(\\[{1}-{0,1}[0-9]*\\]{1})){0,1}))+$";
 
+  /**
+   * returns the first non null object
+   * @param args objects
+   * @param <T> type
+   * @return object
+   */
+  public static <T> T defaultIfNull(T ...args) {
+    for(T arg: args) {
+      if (Objects.nonNull(arg)) {
+        return arg;
+      }
+    }
+    return null;
+  }
+  
   /*
    *
    * example :
